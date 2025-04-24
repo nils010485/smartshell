@@ -1,0 +1,18 @@
+# config.yaml.example
+# Configuration example for SmartShell
+
+api:
+  openai_api_key: YOUR_OPENAI_API_KEY
+  openai_base_url: null
+  openai_force_model: chatgpt-4o-latest
+
+paths:
+  scripts_dir: ~/.sshell/scripts
+  docs_dir: ~/.sshell/docs
+  context_dir: ~/.sshell/context
+  history_file: ~/.smart_shell_history
+
+updater:
+  url: https://api.angelkarlsson.eu/smartshellv2/updater
+
+token_limit: 0
