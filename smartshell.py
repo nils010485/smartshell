@@ -116,7 +116,7 @@ def agentique_mode(model, objective, context=None):
                     context = context[-20:]
             resp4 = send_to_openai(
                 model,
-                f"Résultats: {last}. Répond uniquement en JSON avec clé 'action': 'replan' ou 'continue' ou 'complete'. Si 'replan', ajoute 'plan' avec liste d'étapes.",
+                f"Résultats: {last}. Répond uniquement en JSON avec les clés 'action' et 'result'. 'action' doit être 'replan', 'continue' ou 'complete'. Si 'replan', ajoute 'plan' avec liste d'étapes. Si 'complete', ajoute 'result' contenant la réponse finale de l'agent.",
                 sanitize_context(context)
             )
             context.append({"role":"assistant","content":resp4})
@@ -126,6 +126,8 @@ def agentique_mode(model, objective, context=None):
                 console.print(Panel("Plan ajusté.", style="bold green", expand=False))
                 break
             elif out4 and out4.get('action') == 'complete':
+                # Affiche la réponse finale du LLM avant l'annonce de réussite
+                console.print(Panel(out4.get('result', ''), title="Réponse finale", expand=False))
                 console.print(Panel("Objectif atteint, fin du mode agentique.", style="bold green", expand=False))
                 return
             # sinon continue boucle
