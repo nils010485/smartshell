@@ -2,6 +2,7 @@ import argparse
 import sys
 from rich.console import Console
 from rich.panel import Panel
+from rich.columns import Columns
 from rich.table import Table
 from rich import box
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
@@ -64,76 +65,109 @@ def agentique_mode(model, objective, context=None):
     console.print(table)
     # Exécution et adaptation
     auto = False
-    while True:
-        for idx, step in enumerate(plan, start=1):
-            console.print(Panel(step, title=f"Étape {idx}/{len(plan)}", style="bold yellow", expand=False))
-            choice = console.input("[bold yellow]Valider ? (y/n/a)[/bold yellow] ") if not auto else 'y'
-            if choice.lower() == 'n':
-                comment = console.input("[bold yellow]Commentaire (optionnel) :[/bold yellow] ")
-                fb = f"Étape refusée: {step}." + (f" Commentaire: {comment}" if comment else "")
-                context.append({"role":"user","content":fb})
-                resp2 = send_to_openai(model, f"{fb} Révise le plan en JSON avec 'plan'.", sanitize_context(context))
-                context.append({"role":"assistant","content":resp2})
-                out2 = parse_response(resp2)
-                if out2 and 'plan' in out2:
-                    plan = out2['plan']
-                    console.print(Panel("Plan révisé.", style="bold green", expand=False))
-                    for i2, s2 in enumerate(plan, start=1): console.print(f"  {i2}. {s2}")
+    try:
+        while True:
+            for idx, step in enumerate(plan, start=1):
+                console.print(Panel(step, title=f"Étape {idx}/{len(plan)}", style="bold yellow", expand=False))
+                choice = console.input("[bold yellow]Valider ? (y/n/a)[/bold yellow] ") if not auto else 'y'
+                if choice.lower() == 'n':
+                    comment = console.input("[bold yellow]Commentaire (optionnel) :[/bold yellow] ")
+                    fb = f"Étape refusée: {step}." + (f" Commentaire: {comment}" if comment else "")
+                    context.append({"role":"user","content":fb})
+                    resp2 = send_to_openai(model, f"{fb} Révise le plan en JSON avec 'plan'.", sanitize_context(context))
+                    context.append({"role":"assistant","content":resp2})
+                    out2 = parse_response(resp2)
+                    if out2 and 'plan' in out2:
+                        plan = out2['plan']
+                        console.print(Panel("Plan révisé.", style="bold green", expand=False))
+                        for i2, s2 in enumerate(plan, start=1): console.print(f"  {i2}. {s2}")
+                        break
+                    console.print(Panel("Impossible de réviser le plan.", style="bold red", expand=False))
+                    return
+                # Feedback libre: tout autre input que y/n/a
+                if choice.lower() not in ('y','n','a'):
+                    fb = f"Feedback utilisateur: {choice}"
+                    context.append({"role":"user","content":fb})
+                    resp2 = send_to_openai(model, f"{fb} Révise le plan en JSON avec 'plan'.", sanitize_context(context))
+                    context.append({"role":"assistant","content":resp2})
+                    out2 = parse_response(resp2)
+                    if out2 and 'plan' in out2:
+                        plan = out2['plan']
+                        console.print(Panel("Plan révisé suite à feedback.", style="bold green", expand=False))
+                        for i2, s2 in enumerate(plan, start=1): console.print(f"  {i2}. {s2}")
+                        break
+                    console.print(Panel("Impossible de réviser le plan.", style="bold red", expand=False))
+                    return
+                if choice.lower() == 'a': auto = True
+                # Génération des commandes
+                resp3 = send_to_openai(model, f"Pour l'étape: {step}, répond en JSON avec clé 'commands': [cmds].", sanitize_context(context))
+                context.append({"role":"assistant","content":resp3})
+                out3 = parse_response(resp3)
+                cmds = out3.get('commands', []) if out3 else []
+                last = ""
+                for c in cmds:
+                    console.print(Panel(c, title="Commande", expand=False))
+                    res = execute_command(c)
+                    console.print(Panel(res, title="Résultat", expand=False))
+                    context.extend([{"role":"user","content":c},{"role":"assistant","content":res}])
+                    last = res
+                # Décision suivante (replan / continue / complete)
+                # Tronquer le contexte uniquement si on dépasse le seuil de tokens (80%) pour garder un historique gérable
+                if token_limit and estimate_tokens(context, model) >= token_limit * 0.8:
+                    if len(context) > 20:
+                        context = context[-20:]
+                resp4 = send_to_openai(
+                    model,
+                    f"Résultats: {last}. Répond uniquement en JSON avec les clés 'action' et 'result'. 'action' doit être 'replan', 'continue' ou 'complete'. Si 'replan', ajoute 'plan' avec liste d'étapes. Si 'complete', ajoute 'result' contenant la réponse finale de l'agent.",
+                    sanitize_context(context)
+                )
+                context.append({"role":"assistant","content":resp4})
+                out4 = parse_response(resp4)
+                if out4 and out4.get('action') == 'replan' and 'plan' in out4:
+                    plan = out4['plan']
+                    console.print(Panel("Plan ajusté.", style="bold green", expand=False))
                     break
-                console.print(Panel("Impossible de réviser le plan.", style="bold red", expand=False))
+                elif out4 and out4.get('action') == 'complete':
+                    # Affiche la réponse finale du LLM
+                    console.print(Panel(out4.get('result', ''), title="Réponse finale", expand=False))
+                    # Boucle de feedback ou retour au menu
+                    while True:
+                        fb_choice = console.input("[bold yellow]Revenir au menu (y) ou saisir feedback pour corriger :[/bold yellow] ")
+                        if fb_choice.lower() == 'y':
+                            console.print("[bold green]Retour au menu[/bold green]")
+                            return
+                        # Envoi du feedback à l'agent
+                        fb = f"Feedback utilisateur: {fb_choice}"
+                        context.append({"role": "user", "content": fb})
+                        resp_fb = send_to_openai(model, fb + " Révise la réponse précédente.", sanitize_context(context))
+                        # Affichage de la réponse au feedback, parsing JSON si possible
+                        out_fb = parse_response(resp_fb, hide=True)
+                        if out_fb:
+                            panels_fb = []
+                            if "explanation" in out_fb:
+                                panels_fb.append(Panel(out_fb["explanation"], title="Explications", expand=False, style="bold green"))
+                            if "commands" in out_fb:
+                                panels_fb.append(Panel("; ".join(out_fb["commands"]), title="Commandes", expand=False, style="bold green"))
+                            if "script" in out_fb:
+                                panels_fb.append(Panel(out_fb["script"], title="Script", expand=False, style="bold green"))
+                            if panels_fb:
+                                console.print(Columns(panels_fb))
+                            elif "plan" in out_fb:
+                                for i_fb, step_fb in enumerate(out_fb["plan"], start=1):
+                                    console.print(Panel(step_fb, title=f"Étape {i_fb}/{len(out_fb['plan'])}", expand=False, style="bold yellow"))
+                            else:
+                                console.print(Panel(out_fb.get("result", resp_fb), title="Réponse brute", expand=False, style="bold green"))
+                        else:
+                            console.print(Panel(resp_fb, title="Réponse brute", expand=False, style="bold red"))
+                        context.append({"role": "assistant", "content": resp_fb})
+                        # Reprendre la boucle agentique
+                        break
+            else:
+                console.print(Panel("Mode agentique terminé.", style="bold green", expand=False))
                 return
-            # Feedback libre: tout autre input que y/n/a
-            if choice.lower() not in ('y','n','a'):
-                fb = f"Feedback utilisateur: {choice}"
-                context.append({"role":"user","content":fb})
-                resp2 = send_to_openai(model, f"{fb} Révise le plan en JSON avec 'plan'.", sanitize_context(context))
-                context.append({"role":"assistant","content":resp2})
-                out2 = parse_response(resp2)
-                if out2 and 'plan' in out2:
-                    plan = out2['plan']
-                    console.print(Panel("Plan révisé suite à feedback.", style="bold green", expand=False))
-                    for i2, s2 in enumerate(plan, start=1): console.print(f"  {i2}. {s2}")
-                    break
-                console.print(Panel("Impossible de réviser le plan.", style="bold red", expand=False))
-                return
-            if choice.lower() == 'a': auto = True
-            # Génération des commandes
-            resp3 = send_to_openai(model, f"Pour l'étape: {step}, répond en JSON avec clé 'commands': [cmds].", sanitize_context(context))
-            context.append({"role":"assistant","content":resp3})
-            out3 = parse_response(resp3)
-            cmds = out3.get('commands', []) if out3 else []
-            last = ""
-            for c in cmds:
-                console.print(Panel(c, title="Commande", expand=False))
-                res = execute_command(c)
-                console.print(Panel(res, title="Résultat", expand=False))
-                context.extend([{"role":"user","content":c},{"role":"assistant","content":res}])
-                last = res
-            # Décision suivante (replan / continue / complete)
-            # Tronquer le contexte uniquement si on dépasse le seuil de tokens (80%) pour garder un historique gérable
-            if token_limit and estimate_tokens(context, model) >= token_limit * 0.8:
-                if len(context) > 20:
-                    context = context[-20:]
-            resp4 = send_to_openai(
-                model,
-                f"Résultats: {last}. Répond uniquement en JSON avec les clés 'action' et 'result'. 'action' doit être 'replan', 'continue' ou 'complete'. Si 'replan', ajoute 'plan' avec liste d'étapes. Si 'complete', ajoute 'result' contenant la réponse finale de l'agent.",
-                sanitize_context(context)
-            )
-            context.append({"role":"assistant","content":resp4})
-            out4 = parse_response(resp4)
-            if out4 and out4.get('action') == 'replan' and 'plan' in out4:
-                plan = out4['plan']
-                console.print(Panel("Plan ajusté.", style="bold green", expand=False))
-                break
-            elif out4 and out4.get('action') == 'complete':
-                # Affiche la réponse finale du LLM avant l'annonce de réussite
-                console.print(Panel(out4.get('result', ''), title="Réponse finale", expand=False))
-                console.print(Panel("Objectif atteint, fin du mode agentique.", style="bold green", expand=False))
-                return
-            # sinon continue boucle
-        else:
-            console.print(Panel("Mode agentique terminé.", style="bold green", expand=False))
-            return
+    except (KeyboardInterrupt, EOFError):
+        console.print("[bold green]Retour au menu agentique interrompu[/bold green]")
+        return
 
 def main():
     parser = argparse.ArgumentParser(description="SmartShell")

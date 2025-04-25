@@ -30,7 +30,6 @@ def main():
                 "history_file": "~/.smart_shell_history",
             },
             "updater": {"url": "https://api.angelkarlsson.eu/smartshellv2/updater"},
-            "raw_version": 15,
             "token_limit": 0,
         }
     config = {}
@@ -69,7 +68,7 @@ def main():
         print(f"token_limit doit être 0 ou >=1024. Utilisation de la valeur par défaut {token_default}.")
         token_limit = token_default
 
-    # Sections non configurables: updater et raw_version sont pris du template
+    # Sections non configurables: updater est pris du template
     # Fusionner la configuration example et user
     out_cfg = cfg_example
     out_cfg['api'] = config['api']

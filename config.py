@@ -27,7 +27,7 @@ class Config:
         self.api = cfg.get("api", {})
         self.paths = cfg.get("paths", {})
         self.updater = cfg.get("updater", {})
-        self.raw_version = 16
+        self.raw_version = 17
         self.token_limit = cfg.get("token_limit", 0)
         if self.token_limit != 0 and self.token_limit < 1024:
             raise ValueError(f"token_limit must be 0 (no limit) or >=1024, got {self.token_limit}")

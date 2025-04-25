@@ -437,9 +437,12 @@ def process_user_input(user_input, model, context):
         if not objective:
             console.print("[bold yellow]Veuillez entrer un objectif pour agentique.[/bold yellow]")
             return
-        # Launch agent mode with existing context to persist messages
-        import smartshell
-        smartshell.agentique_mode(model, objective, context)
+        # Launch agent mode avec gestion de Ctrl+C pour revenir au shell
+        try:
+            import smartshell
+            smartshell.agentique_mode(model, objective, context)
+        except (KeyboardInterrupt, EOFError):
+            console.print("[bold green]Retour au shell interactif[/bold green]")
         return
     elif user_input.startswith("context stats"):
         # show context stats
@@ -498,18 +501,30 @@ def process_user_input(user_input, model, context):
                 if not parsed:
                     console.print(Panel("Commande enregistrée.", title="Système", expand=False, style="bold purple"))
                     continue
-                panels = []
-                if "explanation" in parsed:
-                    panels.append(Panel(parsed["explanation"], title="Assistant", expand=False, style="bold green"))
-                if "commands" in parsed:
-                    panels.append(Panel(f"[bold green]{'; '.join(parsed['commands'])}[/bold green]", title="Commandes", expand=False))
-                if "script" in parsed:
-                    import re, uuid
-                    from rich.syntax import Syntax
-                    title = re.search(r"# NAME=(.*?)\n", message["content"])
-                    script_title = title.group(1) if title else f"script_{uuid.uuid4().hex}"
-                    panels.append(Panel(Syntax(parsed["script"], "bash", theme="monokai", line_numbers=True), title=script_title, expand=False))
-                console.print(Columns(panels))
+                # Si action complete, afficher le résultat final
+                if parsed.get("action") == "complete":
+                    console.print(Panel(parsed.get("result", ""), title="Réponse finale", expand=False, style="bold green"))
+                # sinon plan agentique
+                elif "plan" in parsed and isinstance(parsed["plan"], list):
+                    for i, step in enumerate(parsed["plan"], start=1):
+                        console.print(Panel(step, title=f"Étape {i}/{len(parsed['plan'])}", expand=False, style="bold yellow"))
+                # sinon explications/commandes/scripts habituels
+                else:
+                    panels = []
+                    if "explanation" in parsed:
+                        panels.append(Panel(parsed["explanation"], title="Assistant", expand=False, style="bold green"))
+                    if "commands" in parsed:
+                        panels.append(Panel(f"[bold green]{'; '.join(parsed['commands'])}[/bold green]", title="Commandes", expand=False))
+                    if "script" in parsed:
+                        import re, uuid
+                        from rich.syntax import Syntax
+                        title = re.search(r"# NAME=(.*?)\n", message["content"])
+                        script_title = title.group(1) if title else f"script_{uuid.uuid4().hex}"
+                        panels.append(Panel(Syntax(parsed["script"], "bash", theme="monokai", line_numbers=True), title=script_title, expand=False))
+                    if panels:
+                        console.print(Columns(panels))
+                    else:
+                        console.print(Panel(message["content"], title="Assistant", expand=False, style="bold green"))
             elif message["role"] == "bash":
                 console.print(Panel(message["content"], title="Bash", expand=False, style="bold magenta"))
         return
