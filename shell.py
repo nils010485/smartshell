@@ -21,7 +21,7 @@ from executor import execute_command, generate_script
 from utils import check_update
 from config import docs_dir, context_dir, history_file, token_limit, config
 import wizard
-
+from pathlib import Path
 console = Console()
 
 # Sanitize context roles for LLM API (convert non-standard roles like 'bash' to 'user')
@@ -401,7 +401,7 @@ def process_user_input(user_input, model, context):
                 table.add_row(f"paths.{k}", str(v))
             # Other
             table.add_row("updater.url", data.get('updater', {}).get('url', ''))
-            table.add_row("raw_version", str(data.get('raw_version', '')))
+            #table.add_row("raw_version", str(data.get('raw_version', '')))
             table.add_row("token_limit", str(data.get('token_limit', '')))
             console.print(Panel(table, title="Configuration actuelle", expand=False))
             ans = console.input("[bold yellow]Modifier la config ? (y/n)[/bold yellow] ")
