@@ -1,6 +1,13 @@
 import os
 from openai import OpenAI
-from rich.console import Console
+from rich.console import Console, Group
+from rich.live import Live
+from rich.panel import Panel
+from rich.text import Text
+from rich.spinner import Spinner
+from rich import box
+from rich.columns import Columns
+import re
 from contextlib import nullcontext
 from config import openai_api_key, openai_base_url, openai_force_model, token_limit, config
 from utils import get_os_info
@@ -32,22 +39,31 @@ If the user prompt explicitly requests a script (by mentioning 'script') or if t
         system_messages.append({"role": "system", "content": f"User special instruction: {instr}"})
     all_messages = system_messages + msgs
     if use_spinner:
-        # Stream with live status updates
-        with console.status("[bold green]SmartShell réfléchit…[/bold green]", spinner="dots", spinner_style="green") as status:
-            content = ""
-            stream = client.chat.completions.create(
-                model=openai_force_model if model is None else model,
-                messages=all_messages,
-                max_tokens=(token_limit or 4000),
-                temperature=0.0,
-                response_format={'type': 'json_object'},
-                stream=True
-            )
+        # Stream with spinner and live preview
+        content = ""
+        display_content = ""
+        stream = client.chat.completions.create(
+            model=openai_force_model if model is None else model,
+            messages=all_messages,
+            max_tokens=(token_limit or 4000),
+            temperature=0.0,
+            response_format={'type': 'json_object'},
+            stream=True
+        )
+        spinner = Spinner("dots", text="[bold green]SmartShell pense…[/bold green]", style="green")
+        snippet_renderable = Text("", style="green")
+        with Live(Group(spinner, snippet_renderable), refresh_per_second=10, transient=True, console=console) as live:
             for chunk in stream:
                 delta = getattr(chunk.choices[0].delta, "content", "") or ""
                 if delta:
                     content += delta
-                    status.update(f"[bold green]Smartshell infère…[/bold green] {len(content)} caractères")
+                    # Remove JSON keys for display
+                    disp = re.sub(r'\"[a-zA-Z_]+\":', '', delta)
+                    disp = disp.replace('{','').replace('}','').replace('"','')
+                    display_content += disp
+                    snippet_text = display_content if len(display_content) <= 300 else display_content[-300:]
+                    renderable = Group(spinner, Text(snippet_text, style="purple"))
+                    live.update(renderable)
         return content
     # Mode bloquant sans animation
     r = client.chat.completions.create(
