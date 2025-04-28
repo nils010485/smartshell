@@ -31,6 +31,7 @@ def main():
             },
             "updater": {"url": "https://api.angelkarlsson.eu/smartshellv2/updater"},
             "token_limit": 0,
+            "instructions": [],  # persistent LLM instructions
         }
     config = {}
     print("✨ Bienvenue dans le wizard de configuration SmartShell ✨\n")
@@ -74,6 +75,9 @@ def main():
     out_cfg['api'] = config['api']
     out_cfg['paths'] = config['paths']
     out_cfg['token_limit'] = token_limit
+    # Initialize instructions if not present
+    if 'instructions' not in out_cfg:
+        out_cfg['instructions'] = []
     out_path = Path(__file__).parent / 'smartshell.yaml'
     with open(out_path, 'w') as f:
         yaml.safe_dump(out_cfg, f, default_flow_style=False, sort_keys=False)

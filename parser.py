@@ -1,4 +1,4 @@
-import json, traceback
+import json
 from rich.console import Console
 
 console = Console()

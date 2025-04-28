@@ -5,14 +5,12 @@ from rich.panel import Panel
 from rich.columns import Columns
 from rich.table import Table
 from rich import box
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
-import subprocess
 
-from config import openai_api_key, openai_base_url, openai_force_model, raw_version, updater_url, token_limit
-from utils import check_dir, check_update
-from client import send_to_openai, openai2doc
+from config import openai_force_model, token_limit, config
+from utils import check_dir
+from client import send_to_openai
 from parser import parse_response
-from executor import execute_command, generate_script
+from executor import execute_command
 from shell import interactive_shell, estimate_tokens
 
 console = Console()
@@ -171,7 +169,6 @@ def agentique_mode(model, objective, context=None):
 
 def main():
     parser = argparse.ArgumentParser(description="SmartShell")
-    # Commande optionnelle : si absent, on lance le shell interactif par défaut
     parser.add_argument("command", choices=["ask", "shell", "agentique"], nargs="?", default="shell", help="ask, shell, ou agentique (par défaut 'shell')")
     parser.add_argument("prompt", nargs="?", help="Texte pour ask ou agentique")
     parser.add_argument("-m", "--model", default=openai_force_model, help="Modèle OpenAI à utiliser")
@@ -180,7 +177,8 @@ def main():
     if args.command == "ask":
         if not args.prompt:
             parser.error("ask requiert un prompt")
-        response = send_to_openai(args.model, args.prompt)
+        prompt_text = args.prompt
+        response = send_to_openai(args.model, prompt_text)
         out = parse_response(response)
         if not out:
             console.print("[red]Erreur: réponse non comprise.[/red]")
@@ -192,7 +190,8 @@ def main():
     elif args.command == "agentique":
         if not args.prompt:
             parser.error("agentique requiert un prompt")
-        agentique_mode(args.model, args.prompt)
+        prompt_text = args.prompt
+        agentique_mode(args.model, prompt_text)
     else:
         console.print("""[yellow]
   _________                      __   _________.__           .__  .__   
@@ -204,22 +203,7 @@ def main():
                                                         
                                                         """)
         console.print("[green]Bienvenue dans SmartShell ! | https://smartshell.fieryaura.eu/")
-        try:
-            if check_update(mod="quick"):
-                console.print("[yellow]Nouvelle version disponible ![/yellow]")
-                ans = console.input("[bold yellow]Voulez-vous mettre à jour automatiquement ? (y/n) [/bold yellow]")
-                if ans.lower() == 'y':
-                    console.print("[blue]Mise à jour en cours...[/blue]")
-                    try:
-                        subprocess.run(["pip", "install", "--upgrade", "git+https://github.com/nils010485/smartshell.git"], check=True)
-                        console.print("[green]Mise à jour terminée. Redémarrez SmartShell.[/green]")
-                        sys.exit(0)
-                    except Exception:
-                        console.print("[red]La mise à jour a échoué. Veuillez mettre à jour manuellement en faisant : git clone https://github.com/nils010485/smartshell.git && pip install .[/red]")
-                else:
-                    console.print("[yellow]Pour mettre à jour manuellement, exécutez : git clone https://github.com/nils010485/smartshell.git && pip install .[/yellow]")
-        except Exception as e:
-            console.print(f"[red]Erreur vérification update: {e}[/red]")
+
         interactive_shell(args.model)
 
 if __name__ == "__main__":

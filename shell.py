@@ -1,9 +1,6 @@
 import os
 import subprocess
-import re
 import json
-import uuid
-import traceback
 from datetime import datetime
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
@@ -12,17 +9,17 @@ from prompt_toolkit.formatted_text import FormattedText
 from rich.console import Console
 from rich.panel import Panel
 from rich.columns import Columns
-from rich.syntax import Syntax
 from rich.progress import Progress, BarColumn, TimeElapsedColumn, SpinnerColumn
 import yaml
 import sys
+from rich.table import Table
+from rich import box
 
 from client import send_to_openai, openai2doc
 from parser import parse_response
 from executor import execute_command, generate_script
-from utils import get_os_info, check_update
-from config import docs_dir, context_dir, history_file, raw_version, token_limit
-from pathlib import Path
+from utils import check_update
+from config import docs_dir, context_dir, history_file, token_limit, config
 import wizard
 
 console = Console()
@@ -122,11 +119,10 @@ def bash_int(context) -> tuple[list, bool]:  # returns (details, extracted_flag)
             details.append({"command": user_input, "stdout": out, "stderr": err, "exit_code": code})
             continue
         try:
-            result = subprocess.run(user_input, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-            out = result.stdout.strip(); err = result.stderr.strip()
-            if out: console.print(Panel(out, title="Sortie", expand=False))
-            if err: console.print(Panel(err, title="Erreur", style="bold red", expand=False))
-            details.append({"command": user_input, "stdout": out, "stderr": err, "exit_code": result.returncode})
+            subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade",
+                            "git+https://github.com/nils010485/smartshell.git"], check=True)
+            console.print("[green]Mise à jour terminée. Redémarrez SmartShell.[/green]")
+            sys.exit(0)
         except Exception as e:
             console.print(Panel(str(e), title="Erreur interne", style="bold red", expand=False))
     return details, False
@@ -221,7 +217,7 @@ def process_user_input(user_input, model, context):
         console.print(Panel(doc, title="Documentation", expand=False))
         save_doc = console.input("[bold yellow]Voulez-vous enregistrer cette documentation ? (y/n)[/bold yellow] ")
         if save_doc.lower() == "y":
-            doc_path = os.path.join(docs_dir, f"generated_doc_{uuid.uuid4().hex}.md")
+            doc_path = os.path.join(docs_dir, f"generated_doc_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md")
             with open(doc_path, 'w') as f:
                 f.write(doc)
             console.print(f"[bold green]Documentation enregistrée dans : {doc_path}[/bold green]")
@@ -394,7 +390,6 @@ def process_user_input(user_input, model, context):
         else:
             data = yaml.safe_load(cfg_path.read_text())
             # Affichage structuré de la config
-            from rich.table import Table
             table = Table(show_header=True, header_style="bold magenta")
             table.add_column("Clé", style="cyan")
             table.add_column("Valeur", style="white")
@@ -449,7 +444,6 @@ def process_user_input(user_input, model, context):
         total_chars = sum(len(m.get('content','')) for m in context)
         total_msgs = len(context)
         total_t = estimate_tokens(context, model)
-        from rich.table import Table
         table = Table(title="Contexte actuel")
         table.add_column("Messages", justify="right")
         table.add_column("Caractères", justify="right")
@@ -551,6 +545,11 @@ def process_user_input(user_input, model, context):
 [bold blue]Configuration :[/bold blue]
 [bold yellow]conf[/bold yellow] : Afficher/éditer la configuration.
 
+[bold blue]Instructions persistantes :[/bold blue]
+[bold yellow]instruction list[/bold yellow]  : Lister les instructions LLM.
+[bold yellow]instruction add <texte>[/bold yellow]   : Ajouter une instruction.
+[bold yellow]instruction remove <id>[/bold yellow]   : Supprimer une instruction.
+
 [bold blue]Interaction IA :[/bold blue]
 [bold yellow]ask <prompt>[/bold yellow] : Envoyer un prompt simple.
 [bold yellow]script <prompt>[/bold yellow] : Générer un script.
@@ -558,6 +557,46 @@ def process_user_input(user_input, model, context):
 [bold yellow]agentique <objectif>[/bold yellow] : Mode autonome avec validation.
 [bold yellow]doc <description>[/bold yellow] : Générer de la documentation.
 """
+        console.print(Panel(help_text, title="Aide", expand=False))
+        return
+    elif user_input.startswith("instruction"):
+        parts = user_input.split(maxsplit=2)
+        if len(parts) == 1 or parts[1] == "list":
+            table = Table(title="Instructions", box=box.SQUARE)
+            table.add_column("ID", style="bold yellow")
+            table.add_column("Instruction", style="cyan")
+            for idx, instr in enumerate(config.instructions):
+                table.add_row(str(idx), instr)
+            console.print(table)
+        elif parts[1] == "add" and len(parts) == 3:
+            config.add_instruction(parts[2])
+            console.print(Panel(parts[2], title="Instruction ajoutée", style="bold green"))
+        elif parts[1] == "remove" and len(parts) == 3 and parts[2].isdigit():
+            idx = int(parts[2])
+            try:
+                config.remove_instruction(idx)
+                console.print(Panel(str(idx), title="Instruction supprimée", style="bold green"))
+            except IndexError:
+                console.print(f"[red]ID invalide: {idx}[/red]")
+        else:
+            console.print("[red]Usage: instruction list|add <texte>|remove <id>[/red]")
+        return
+    elif user_input.lower() in ("help", "?"):
+        help_text = (
+            "[bold]Commandes SmartShell interactif:[/bold]\n"
+            "ask <texte>       : poser un prompt à l'LLM\n"
+            "agentique <texte> : mode agentique\n"
+            "instruction list  : lister les instructions LLM\n"
+            "instruction add <texte>    : ajouter une instruction\n"
+            "instruction remove <id>    : supprimer une instruction\n"
+            "script <texte>    : forcer génération de script\n"
+            "doc               : générer documentation\n"
+            "save              : sauvegarder le contexte\n"
+            "load <fichier>    : charger un contexte\n"
+            "clear             : effacer l'écran\n"
+            "context clear     : effacer le contexte\n"
+            "exit              : quitter"
+        )
         console.print(Panel(help_text, title="Aide", expand=False))
         return
     else:
